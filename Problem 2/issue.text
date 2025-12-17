@@ -1,0 +1,110 @@
+1: Tidak Ada Error Handling (Decode & Atoi)
+Masalah
+json.NewDecoder(r.Body).Decode(&todo)
+id, _ := strconv.Atoi(params["id"])
+
+
+Error di-ignore
+
+Jika body invalid JSON ➜ server tetap lanjut
+
+Jika id bukan angka ➜ id = 0 (BUG serius)
+
+Fix
+if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
+    http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+    return
+}
+
+id, err := strconv.Atoi(params["id"])
+if err != nil {
+    http.Error(w, "Invalid ID", http.StatusBadRequest)
+    return
+}
+
+
+2: Data Race / Tidak Thread-Safe
+Masalah
+var todos []Todo
+var nextID = 1
+
+
+todos & nextID global variable
+
+HTTP server Go itu concurrent
+
+Bisa terjadi:
+
+duplicate ID
+
+corrupted slice
+
+panic
+
+Fix (pakai mutex)
+var (
+    todos  = []Todo{}
+    nextID = 1
+    mu     sync.Mutex
+)
+
+
+Gunakan di handler:
+
+mu.Lock()
+defer mu.Unlock()
+
+3: Tidak Set HTTP Status Code & Header
+Masalah
+json.NewEncoder(w).Encode(todo)
+
+
+Default status = 200 OK
+
+Tidak set Content-Type
+
+REST API harus eksplisit
+
+Fix
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusCreated)
+json.NewEncoder(w).Encode(todo)
+
+4: deleteTodo Tidak Handle “Not Found”
+Masalah
+for i, todo := range todos {
+    if todo.ID == id {
+        todos = append(todos[:i], todos[i+1:]...)
+        break
+    }
+}
+
+Kalau ID tidak ditemukan ➜ tetap return "Todo deleted"
+Ini bug logic API
+
+found := false
+
+Fix
+for i, todo := range todos {
+    if todo.ID == id {
+        todos = append(todos[:i], todos[i+1:]...)
+        found = true
+        break
+    }
+}
+
+if !found {
+    http.Error(w, "Todo not found", http.StatusNotFound)
+    return
+}
+
+5: Server Start Error Diabaikan
+Masalah
+http.ListenAndServe(":8080", r)
+
+
+Error tidak ditangani
+Kalau port dipakai ➜ silent failure
+
+Fix
+log.Fatal(http.ListenAndServe(":8080", r))
